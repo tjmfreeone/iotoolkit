@@ -4,6 +4,7 @@ from _asyncio import Future
 from hashlib import md5
 from logging import Logger
 from time import time
+from abc import ABC, abstractmethod
 
 from motor.motor_asyncio import AsyncIOMotorCursor, AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import UpdateOne
@@ -27,7 +28,7 @@ class IOFactory:
         if kwargs:
             cursor = col_obj.find(**kwargs)
         else:
-            cursor = col_obj.get_collection(col).find()
+            cursor = col_obj.find()
         doc_cnt_future = col_obj.estimated_document_count() if not query else col_obj.count_documents(query)
         getter = MongoGetter(col, cursor, batch_size or DefaultValue.getter_batch_size, max_size, doc_cnt_future,
                              logger)
@@ -40,8 +41,18 @@ class IOFactory:
         return writer
 
 
-class BaseGetter:
-    pass
+class BaseGetter(ABC):
+    @abstractmethod
+    def __aiter__(self):
+        """
+        base getter should implement __aiter__
+        """
+
+    @abstractmethod
+    def __anext__(self):
+        """
+         base getter should implement __anext__
+        """
 
 
 class MongoGetter(BaseGetter, LogKit):
@@ -54,8 +65,8 @@ class MongoGetter(BaseGetter, LogKit):
         self.total_cnt = max_size
         self.finish_rate = 0
         self.doc_cnt_future = doc_cnt_future
-        self.logger = logger or self.logger
         self.new_logger(self.__class__.__name__)
+        self.logger = logger or self.logger
         self.first_fetch_ts = None
         self.last_fetch_ts = None
 
@@ -91,8 +102,12 @@ class MongoGetter(BaseGetter, LogKit):
         return next_lst
 
 
-class BaseWriter:
-    pass
+class BaseWriter(ABC):
+    @abstractmethod
+    def write(self, docs: list):
+        """
+        base writer should implement write method
+        """
 
 
 class MongoWriter(BaseWriter, LogKit):
@@ -101,20 +116,16 @@ class MongoWriter(BaseWriter, LogKit):
             raise ValueError("write method must be one of ['insert', 'upsert']")
         self.col_obj = col_obj
         self.write_method = write_method
-        self.logger = logger or self.logger
         self.written = 0
-        self.last_write_ts = None
         self.new_logger(self.__class__.__name__)
+        self.logger = logger or self.logger
 
     async def write(self, docs: list):
-        if not self.last_write_ts:
-            self.last_write_ts = time()
         if self.write_method == "insert":
             try:
+                before_write_ts = time()
                 await self.col_obj.insert_many(docs)
-                curr_ts = time()
-                cost_time = curr_ts - self.last_write_ts
-                self.last_write_ts = curr_ts
+                cost_time = time() - before_write_ts
                 self.written += len(docs)
                 self.logger.info(self.writer_batch_msg_tmpl.format(self.col_obj.name, len(docs), self.written,
                                                                    FuncSet.x2humansTime(cost_time)))
@@ -129,10 +140,9 @@ class MongoWriter(BaseWriter, LogKit):
                     else:
                         _id = doc["_id"]
                     ops.append(UpdateOne({"_id": _id}, {"$set": doc}, upsert=True))
+                before_write_ts = time()
                 await self.col_obj.bulk_write(ops)
-                curr_ts = time()
-                cost_time = curr_ts - self.last_write_ts
-                self.last_write_ts = curr_ts
+                cost_time = time() - before_write_ts
                 self.written += len(docs)
                 self.logger.info(self.writer_batch_msg_tmpl.format(self.col_obj.name, len(docs), self.written,
                                                                    FuncSet.x2humansTime(cost_time)))

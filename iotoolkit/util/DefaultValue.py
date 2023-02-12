@@ -4,6 +4,6 @@
 class DefaultValue:
     getter_batch_size = 10
     mongo_writer_method = "insert"
-    redis_port = 6739
+    redis_port = 6379
     redis_db = 0
     encoding = "utf-8"

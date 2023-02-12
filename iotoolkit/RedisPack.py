@@ -15,7 +15,7 @@ class RedisPack(LogKit):
             port=port,
             password=password
         )
-        print(self.conn_schema)
+
         self.conn_schema.update(
             encoding=encoding,
             decode_responses=True

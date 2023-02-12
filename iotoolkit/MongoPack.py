@@ -68,7 +68,7 @@ class MongoPack(LogKit):
         :param password: auth pwd
         :param db: database's name
         """
-        if not schema and not any([host, port, username, password, db]):
+        if not schema and any([not host, not port, not username, not password, not db]):
             raise ValueError("set conn schema fail cause some args got 'None' value!")
         if schema:
             self.conn_schema = schema
