@@ -18,7 +18,7 @@ def ensure_connected(method):
         if not method_this.is_ready():
             method_this.logger.info(
                 "mongodb[{}]'s connection building...".format(method_this._schema_detail["database"]))
-            method_this.build_connect()
+            method_this._build_connect()
         result = method(method_this, *args, **kwargs)
         return result
 
@@ -80,7 +80,7 @@ class MongoPack(LogKit):
                                                                                         db=db)
         self._schema_detail = uri_parser.parse_uri(self.conn_schema)
 
-    def build_connect(self) -> None:
+    def _build_connect(self) -> None:
         if self.conn_schema:
             db = self.conn_schema.strip().split("/")[-1]
             if self.init_async:
@@ -110,5 +110,10 @@ class MongoPack(LogKit):
 
     @ensure_connected
     def new_writer(self, col: str, write_method: str = None, logger: Logger = None) -> BaseWriter:
+        """
+        create a writer object
+        :param col: collection's name
+        :param write_method: insert or upsert
+        """
         writer = IOFactory.create_mongo_writer(self.async_db_cli, col, write_method, logger)
         return writer

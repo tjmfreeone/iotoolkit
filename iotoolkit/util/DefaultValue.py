@@ -7,3 +7,4 @@ class DefaultValue:
     redis_port = 6379
     redis_db = 0
     encoding = "utf-8"
+    grab_time_out = 5

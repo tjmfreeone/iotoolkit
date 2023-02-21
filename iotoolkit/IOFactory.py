@@ -123,6 +123,9 @@ class MongoWriter(BaseWriter, LogKit):
     async def write(self, docs: list):
         if self.write_method == "insert":
             try:
+                for doc in docs:
+                    if "_id" not in doc:
+                        doc["_id"] = md5(str(doc).encode()).hexdigest()
                 before_write_ts = time()
                 await self.col_obj.insert_many(docs)
                 cost_time = time() - before_write_ts

@@ -12,10 +12,14 @@ class LogKit:
     logger = logging.getLogger("DefaultLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(stream_handler)
+
     getter_batch_msg_tmpl = "src: {} | fetch: {} | progress: {}/{}, {}% | cost: {} | left: {}"
     getter_finish_msg_tmpl = "finished report | src: {} | total: {} | cost: {}"
-
     writer_batch_msg_tmpl = "dest: {} | write: {} | written: {} | cost: {}"
+
+    grabber_succ_msg_tmpl = "success | method: {} | addr: {} | status: {} | resp body size: {} | cost: {}"
+    grabber_fail_msg_tmpl = "fail | method: {} | addr: {} | cause: {} | cost: {} | retry: {}"
+    grabber_give_up_msg_tmpl = "give up | method: {} | addr: {} | exceed retry times."
 
     def new_logger(self, name: str):
         self.logger = logging.getLogger(name)
