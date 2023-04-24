@@ -7,8 +7,8 @@ import asyncio
 
 
 class AsyncJobSchedular(Scheduler):
-    def __init__(self, close_timeout: float = 0.1, limit: int = 100, pending_limit: int = 200):
-        super().__init__(close_timeout=close_timeout, limit=limit, pending_limit=pending_limit)
+    def __init__(self, limit: int = 100, pending_limit: int = 200):
+        super().__init__(limit=limit, pending_limit=pending_limit)
 
     async def wrapper(self, coro, callback):
         result = await coro

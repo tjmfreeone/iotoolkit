@@ -42,8 +42,6 @@ class MongoPack(LogKit):
         self.sync_conn = None
         self.sync_db_cli = None
 
-        self.new_logger(self.__class__.__name__)
-
     def is_ready(self):
         return any([self.async_db_cli is not None,
                     self.sync_db_cli is not None])
@@ -93,19 +91,22 @@ class MongoPack(LogKit):
             raise ConnectionError("conn schema is None")
 
     @ensure_connected
-    def new_getter(self, col: str, query: dict = {}, return_fields: list = [], batch_size: int = None,
-                   max_size: int = None, logger: Logger = None, *args, **kwargs) -> BaseGetter:
+    def new_getter(self, col: str, query: dict = None, return_fields: list = None, batch_size: int = None,
+                   max_size: int = None, reverse: bool = False, logger: Logger = None, *args, **kwargs) -> BaseGetter:
         """
         :param col: collection's name
         :param query: query body
         :param return_fields: projection fields
         :param max_size: return-data's max size
         :param batch_size: size of batch data
+        :param reverse: whether read in reverse order
         :param logger: Logger instance
         :return: async iter
         """
+        if return_fields is None:
+            return_fields = list()
         getter = IOFactory.create_mongo_getter(self.async_db_cli, col, query, return_fields,
-                                               batch_size, max_size, logger)
+                                               batch_size, max_size, reverse, logger)
         return getter
 
     @ensure_connected
@@ -113,7 +114,7 @@ class MongoPack(LogKit):
         """
         create a writer object
         :param col: collection's name
-        :param write_method: insert or upsert
+        :param write_method: insert, upsert or insertButNotUpdate
         """
         writer = IOFactory.create_mongo_writer(self.async_db_cli, col, write_method, logger)
         return writer

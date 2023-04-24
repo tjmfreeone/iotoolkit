@@ -29,7 +29,8 @@ class RedisPack(LogKit):
     async def get_redis_db_cli(self, db: int = 0, sync_type="async"):
         redis_db_cli = None
         if sync_type == "async":
-            if not self.async_cli_map.get(db) or not self._is_connection_alive(self.async_cli_map.get(db), sync_type):
+            if not self.async_cli_map.get(db) or not await self._is_connection_alive(self.async_cli_map.get(db),
+                                                                                     sync_type):
                 pool = aioredis.ConnectionPool(**self.conn_schema, db=db)
                 self.async_cli_map[db] = aioredis.Redis(connection_pool=pool)
             redis_db_cli = self.async_cli_map[db]
@@ -59,7 +60,7 @@ class RedisPack(LogKit):
         for cli in self.async_cli_map.values():
             try:
                 await cli.close()
-            except:
+            except...:
                 pass
         self.async_cli_map.clear()
 
