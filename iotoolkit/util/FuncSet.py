@@ -1,10 +1,12 @@
 # @Author : taojinmin
 # @Time : 2023/2/7 18:42
 from functools import wraps
+from types import FunctionType
+from . import LogKit
 import inspect
 import random
 import asyncio
-
+        
 min_secs = 60
 hour_secs = 3600
 day_secs = 3600 * 24

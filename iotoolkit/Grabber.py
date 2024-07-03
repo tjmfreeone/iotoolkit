@@ -19,6 +19,11 @@ class StatusError(Exception):
         return repr(f"status code error:{self.error_code}")
 
 
+class ResponseIsNoneError(Exception):
+    def __str__(self):
+        return repr(f"got a null response")
+
+
 class Grabber(LogKit):
     session_pool = list()
     user_agent_factory = Factory.create(providers=["faker.providers.user_agent", "faker.providers.date_time"])
@@ -63,6 +68,8 @@ class Grabber(LogKit):
                                           )
                 if str(resp.status)[0] not in "23":
                     raise StatusError(resp.status)
+                if resp is None:
+                    raise ResponseIsNoneError()
                 self.succ_counter.success()
                 msg = self.grabber_succ_msg_tmpl.format(sess_id, method, url, resp.status,
                                                         FuncSet.x2humansTime(time.time() - start_ts), self.succ_counter.rate())
