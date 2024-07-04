@@ -164,9 +164,3 @@ class BaseWriter(ABC, LogKit):
     @abstractmethod
     async def _handle_lst(self, lst: List[Any], *args, **kwargs):
         ...
-
-
-
-
-    
-        
