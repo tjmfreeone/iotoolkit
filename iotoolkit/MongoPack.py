@@ -1,19 +1,17 @@
 # @Author : taojinmin
 # @Time : 2023/2/6 16:59
 import inspect
-
+import traceback
 from time import time
 from hashlib import md5
-from functools import wraps
 from logging import Logger
 
 from motor.motor_asyncio import AsyncIOMotorCursor, AsyncIOMotorCollection, AsyncIOMotorDatabase, AsyncIOMotorClient
 from pymongo import MongoClient
-from urllib.parse import urlparse
 
 from iotoolkit.Meta import BasePack, BaseGetter, BaseWriter
 from iotoolkit.util import DefaultValue, LogKit, FuncSet
-from typing import List
+from typing import List, Any
 from types import MappingProxyType, DynamicClassAttribute
 
 
@@ -83,97 +81,56 @@ class MongoPack(LogKit, BasePack):
 
 
 class MongoGetter(BaseGetter):
+    src_name = ""
+    
     def __init__(self, col_obj, cursor: AsyncIOMotorCursor, query, batch_size: int = None, max_size: int = 0):
+        super().__init__(batch_size=batch_size, max_size=max_size)
         self.col_obj = col_obj
         self.cursor = cursor
         self.query = query
-        self.batch_size = batch_size
-        self.done_cnt = 0
-        self.max_size = max_size
-        self.total_cnt = 0
-        self.finish_rate = 0
-        self.first_fetch_ts = None
-        self.last_fetch_ts = None
+        self.src_name = self.col_obj.name
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
+    async def _get_total_count(self):
         if not self.total_cnt:
-            await self.get_total_count()
-        if not self.first_fetch_ts:
-            self.first_fetch_ts = time()
-            self.last_fetch_ts = self.first_fetch_ts
-        next_lst = await self.cursor.to_list(length=self.batch_size)
-        curr_ts = time()
-        cost_time = curr_ts - self.last_fetch_ts
-        self.last_fetch_ts = curr_ts
-        if not next_lst:
-            msg = self.getter_finish_msg_tmpl.format(self.col_obj.name, self.done_cnt,
-                                                     FuncSet.x2humansTime(time() - self.first_fetch_ts))
-            self.logger.info(msg)
-            await self.cursor.close()
-            raise StopAsyncIteration
-        # fetch stats
-        self.done_cnt += len(next_lst)
-        self.finish_rate = self.done_cnt / self.total_cnt
-        finish_rate_str = "%.2f" % (self.finish_rate * 100)
-        fetch_cnt_per_sec = self.done_cnt / (time() - self.first_fetch_ts)
-        # fetch_cnt_per_sec = len(next_lst) / cost_time
-        left_time = (self.total_cnt - self.done_cnt) / fetch_cnt_per_sec
-        msg = self.getter_batch_msg_tmpl.format(self.col_obj.name, len(next_lst), self.done_cnt, self.total_cnt,
-                                                finish_rate_str,
-                                                FuncSet.x2humansTime(cost_time), FuncSet.x2humansTime(left_time))
-        self.logger.info(msg)
-        return next_lst
+            if self.max_size:
+                self.total_cnt = self.max_size
+            elif not self.query:
+                self.total_cnt = await self.col_obj.estimated_document_count()
+            else:
+                self.total_cnt = await col_obj.count_documents(query)
 
-    async def get_total_count(self):
-        if self.max_size:
-            self.total_cnt = self.max_size
-        elif not self.query:
-            self.total_cnt = await self.col_obj.estimated_document_count()
-        else:
-            self.total_cnt = await col_obj.count_documents(query)
+    async def _get_next_lst(self) -> List:
+        return await self.cursor.to_list(length=self.batch_size)
 
 
 class MongoWriter(BaseWriter):
+    dst_name = ""
+    
     def __init__(self, col_obj: AsyncIOMotorCollection, write_method: str = "insert"):
+        super().__init__()
         if write_method not in ["insert", "insertButNotUpdate", "upsert"]:
             raise ValueError("write method must be one of ['insert', 'insertButNotUpdate', 'upsert']")
         self.col_obj = col_obj
         self.write_method = write_method
-        self.written = 0
+        self.dst_name = self.col_obj.name
 
-    async def write(self, docs: list):
-        if self.write_method == "insert":
-            try:
-                for doc in docs:
+    async def _handle_lst(self, lst: List[Any]):
+        try:
+            if self.write_method == "insert":
+                for doc in lst:
                     if "_id" not in doc:
                         doc["_id"] = md5(str(doc).encode()).hexdigest()
-                before_write_ts = time()
-                await self.col_obj.insert_many(docs)
-                cost_time = time() - before_write_ts
-                self.written += len(docs)
-                self.logger.info(self.writer_batch_msg_tmpl.format(self.col_obj.name, len(docs), self.written,
-                                                                   FuncSet.x2humansTime(cost_time)))
-            except Exception as e:
-                self.logger.error(e)
-        elif self.write_method in ["insertButNotUpdate", "upsert"]:
-            set_op = "$set" if self.write_method == "upsert" else "$setOnInsert"
-            try:
+                await self.col_obj.insert_many(lst)
+            elif self.write_method in ["insertButNotUpdate", "upsert"]:
+                set_op = "$set" if self.write_method == "upsert" else "$setOnInsert"
                 ops = list()
-                for doc in docs:
+                for doc in lst:
                     if "_id" not in doc:
                         _id = md5(str(doc).encode()).hexdigest()
                     else:
                         _id = doc["_id"]
                     ops.append(UpdateOne({"_id": _id}, {set_op: doc}, upsert=True))
-                before_write_ts = time()
                 await self.col_obj.bulk_write(ops)
-                cost_time = time() - before_write_ts
-                self.written += len(docs)
-                self.logger.info(self.writer_batch_msg_tmpl.format(self.col_obj.name, len(docs), self.written,
-                                                                   FuncSet.x2humansTime(cost_time)))
-
-            except Exception as e:
-                self.logger.error(e)
+        except Exception as e:
+            self.logger.error(e)
+            

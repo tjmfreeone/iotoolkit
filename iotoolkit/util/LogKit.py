@@ -15,7 +15,7 @@ class LogKit:
 
     getter_batch_msg_tmpl = "src: {} | fetch: {} | progress: {}/{}, {}% | cost: {} | left: {}"
     getter_finish_msg_tmpl = "finished report | src: {} | total: {} | cost: {}"
-    writer_batch_msg_tmpl = "dest: {} | write: {} | written: {} | cost: {}"
+    writer_batch_msg_tmpl = "dst: {} | write: {} | written: {} | cost: {}"
 
     grabber_succ_msg_tmpl = "SESS-{} | SUCCESS | {} | {} | status: {} | cost: {} | succ rate: {}"
     grabber_fail_msg_tmpl = "SESS-{} | FAIL({}) | {} | {} | cause: {} | cost: {} | succ rate: {}"

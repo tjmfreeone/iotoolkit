@@ -27,7 +27,6 @@ class MySqlPack(LogKit, BasePack):
         self.scheme = "mysql"
         BasePack.__init__(self, *args, **kwargs)
         
-
     async def _build_connect(self):
         conn_config_copy = self.conn_config.copy()
         conn_config_copy["user"] = conn_config_copy.pop("username")
@@ -39,7 +38,7 @@ class MySqlPack(LogKit, BasePack):
         return self.origin_conn_obj["pool"] is not None
 
     @FuncSet.ensure_connected
-    async def new_getter(self, select_sql: str = "", table: str = "", return_fields: List[str] = None, where: str = "", offset: int = 0, limit: int = 0, batch_size: int = 10) -> BaseGetter:
+    async def new_getter(self, select_sql: str = "", table: str = "", return_fields: List[str] = None, where: str = "", offset: int = 0, limit: int = 0, batch_size: int = 100) -> BaseGetter:
         """
         :param select_sql: raw sql
         :param table: table name
@@ -82,6 +81,7 @@ class MySqlGetter(BaseGetter, LogKit):
     _conn: aiomysql.connection = None
     # 读取数据时需要保持cursor对象为同一个, 不使用async with方式实例化
     _cursor: aiomysql.DictCursor = None
+    src_name: str = ""
 
     def __init__(self, pool: aiomysql.pool = None,
                  select_sql: str = "", table: str = "",
@@ -110,13 +110,9 @@ class MySqlGetter(BaseGetter, LogKit):
 
         self.sql_parser = Parser(select_sql)
         self.table = table or self.sql_parser.tables[0]
-        self.batch_size = batch_size
-        self.done_cnt = 0
-        self.max_size = limit
-        self.total_cnt = 0
-        self.finish_rate = 0
-        self.first_fetch_ts = None
-        self.last_fetch_ts = None
+        self.src_name = self.table
+        
+        super().__init__(batch_size=batch_size, max_size=limit)
         self.has_execute = False
 
     async def _init_conn_coro(self):
@@ -128,78 +124,48 @@ class MySqlGetter(BaseGetter, LogKit):
         await self._cursor.close()
         self._pool.release(self._conn)
 
-    def __aiter__(self):
-        return self
-
     async def __anext__(self):
         await self._init_conn_coro()
-
-        if not self.first_fetch_ts:
-            self.first_fetch_ts = time()
-            self.last_fetch_ts = self.first_fetch_ts
-
         if not self.has_execute:
             await self._cursor.execute(self.select_sql)
             self.has_execute = True
-
+        await self._get_total_count()
+        return await super().__anext__()
+    
+    async def _get_total_count(self):
         if not self.total_cnt:
             self.total_cnt = self._cursor.rowcount
+
+    async def _get_next_lst(self) -> List:
         next_lst = await self._cursor.fetchmany(self.batch_size)
-        curr_ts = time()
-        cost_time = curr_ts - self.last_fetch_ts
-        self.last_fetch_ts = curr_ts
-        if not next_lst:
-            msg = self.getter_finish_msg_tmpl.format(self.table, self.done_cnt,
-                                                     FuncSet.x2humansTime(time() - self.first_fetch_ts))
-            self.logger.info(msg)
-            await self.release()
-            raise StopAsyncIteration
-        # fetch stats
-        self.done_cnt += len(next_lst)
-        self.finish_rate = self.done_cnt / self.total_cnt
-        finish_rate_str = "%.2f" % (self.finish_rate * 100)
-        fetch_cnt_per_sec = self.done_cnt / (time() - self.first_fetch_ts)
-        # fetch_cnt_per_sec = len(next_lst) / cost_time
-        left_time = (self.total_cnt - self.done_cnt) / fetch_cnt_per_sec
-        msg = self.getter_batch_msg_tmpl.format(self.table, len(next_lst), self.done_cnt, self.total_cnt,
-                                                finish_rate_str,
-                                                FuncSet.x2humansTime(cost_time), FuncSet.x2humansTime(left_time))
-        self.logger.info(msg)
         return next_lst
-
-
+        
+        
 class MySqlWriter(BaseWriter):
     _pool = None
+    dst_name: str = ""
 
     def __init__(self, pool: aiomysql.pool, table: str = ""):
+        super().__init__()
         self._pool = pool
         self.table = table
-        self.written = 0
+        self.dst_name = table
 
-    async def write(self, docs: List[Dict]):
+    async def write(self, lst: List[Dict]):
         async with self._pool.acquire() as conn:
-            # 使用async with 方式 获取到链接以便自动回收，避免链接数过多
-            try:
-                before_write_ts = time()
-                # docs 's process
-                docs = list(map(OrderedDict, docs))
-                table_head = tuple(OrderedDict(docs[0]).keys())
-                values_desc = ", ".join(["%s"] * len(table_head))
-                table_head_desc = ", ".join(table_head)
-                values_list = list(map(tuple, [doc.values() for doc in docs]))
+            # 使用async with 方式 获取到链接以便自动回收，避免链接数过多 
+            await super().write(lst, conn)
+            
+    async def _handle_lst(self, lst, conn):
+        docs = list(map(OrderedDict, lst))
+        table_head = tuple(OrderedDict(docs[0]).keys())
+        values_desc = ", ".join(["%s"] * len(table_head))
+        table_head_desc = ", ".join(table_head)
+        values_list = list(map(tuple, [doc.values() for doc in docs]))
 
-                write_sql = f"INSERT INTO {self.table} ({table_head_desc}) VALUES ({values_desc});"
-                
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
-                    await cursor.executemany(write_sql, values_list)
-                    await conn.commit()
-                    
-                cost_time = time() - before_write_ts
-                self.written += len(docs)
-                self.logger.info("write sql: " + write_sql)
-                self.logger.info(self.writer_batch_msg_tmpl.format(self.table, len(docs), self.written,
-                                                                   FuncSet.x2humansTime(cost_time)))
-            except Exception as e:
-                self.logger.error(traceback.format_exc())
-                self.logger.error(e)
+        write_sql = f"INSERT INTO {self.table} ({table_head_desc}) VALUES ({values_desc});"
+
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.executemany(write_sql, values_list)
+            await conn.commit()
 
