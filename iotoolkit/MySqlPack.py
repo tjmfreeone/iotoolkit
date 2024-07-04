@@ -9,7 +9,6 @@ from time import time
 
 import aiomysql
 import pymysql
-from types import MappingProxyType
 from typing import List, Dict
 import traceback
 
@@ -19,59 +18,27 @@ from sql_metadata import Parser
 from collections import OrderedDict
 
 
-
-def ensure_connected(method):
-    @wraps(method)
-    async def wrapper(method_this: BasePack, *args, **kwargs):
-        if not inspect.iscoroutinefunction(method):
-            raise ValueError("method must be coroutine function...")
-        if not method_this.is_ready():
-            method_this.logger.info(
-                "mysql[{}]'s connection building...".format(method_this.conn_config.get("db")))
-            await method_this._build_connect()
-        result = await method(method_this, *args, **kwargs)
-        return result
-    return wrapper
-
-
 class MySqlPack(LogKit, BasePack):
-    pack_name = "mysql"
     origin_conn_obj = {
         "pool": None,
     }
-
-    def __init__(self,
-                 host="",
-                 port="",
-                 username="",
-                 password="",
-                 db="",
-                 ):
-        """
-        """
-        if not any([
-            host, port, username, password, db
-        ]):
-            raise ValueError("connection params error!")
-        self.conn_config = MappingProxyType(
-            {
-                "host": host,
-                "port": int(port),
-                "user": username,
-                "password": password,
-                "db": db
-            }
-        )
+    
+    def __init__(self, *args, **kwargs):
+        self.scheme = "mysql"
+        BasePack.__init__(self, *args, **kwargs)
+        
 
     async def _build_connect(self):
+        conn_config_copy = self.conn_config.copy()
+        conn_config_copy["user"] = conn_config_copy.pop("username")
         self.origin_conn_obj["pool"] = await aiomysql.create_pool(cursorclass=pymysql.cursors.DictCursor,
                                                                   autocommit=False,
-                                                                  **self.conn_config)
+                                                                  **conn_config_copy)
 
     def is_ready(self):
         return self.origin_conn_obj["pool"] is not None
 
-    @ensure_connected
+    @FuncSet.ensure_connected
     async def new_getter(self, select_sql: str = "", table: str = "", return_fields: List[str] = None, where: str = "", offset: int = 0, limit: int = 0, batch_size: int = 10) -> BaseGetter:
         """
         :param select_sql: raw sql
@@ -89,7 +56,7 @@ class MySqlPack(LogKit, BasePack):
                              offset=offset, limit=limit, batch_size=batch_size)
         return getter
 
-    @ensure_connected
+    @FuncSet.ensure_connected
     async def new_writer(self, table: str = "") -> BaseWriter:
         """
         create a writer object
@@ -113,6 +80,7 @@ class MySqlPack(LogKit, BasePack):
 class MySqlGetter(BaseGetter, LogKit):
     _pool: aiomysql.pool = None
     _conn: aiomysql.connection = None
+    # 读取数据时需要保持cursor对象为同一个, 不使用async with方式实例化
     _cursor: aiomysql.DictCursor = None
 
     def __init__(self, pool: aiomysql.pool = None,
@@ -200,44 +168,38 @@ class MySqlGetter(BaseGetter, LogKit):
         return next_lst
 
 
-class MySqlWriter(BaseWriter, LogKit):
+class MySqlWriter(BaseWriter):
     _pool = None
-    _conn = None
-    _cursor = None
 
     def __init__(self, pool: aiomysql.pool, table: str = ""):
         self._pool = pool
         self.table = table
         self.written = 0
 
-    async def _init_conn_coro(self):
-        if not self._cursor:
-            self._conn = await self._pool.acquire()
-            self._cursor = await self._conn.cursor(aiomysql.DictCursor)
-
-    async def release(self):
-        await self._cursor.close()
-        self._pool.release(self._conn)
-
     async def write(self, docs: List[Dict]):
-        await self._init_conn_coro()
-        try:
-            before_write_ts = time()
-            docs = list(map(OrderedDict, docs))
-            table_head = tuple(OrderedDict(docs[0]).keys())
-            values_desc = ", ".join(["%s"] * len(table_head))
-            table_head_desc = ", ".join(table_head)
-            values_list = list(map(tuple, [doc.values() for doc in docs]))
-            
-            write_sql = f"INSERT INTO {self.table} ({table_head_desc}) VALUES ({values_desc});"
-            await self._cursor.executemany(write_sql, values_list)
-            await self._conn.commit()
-            cost_time = time() - before_write_ts
-            self.written += len(docs)
-            self.logger.info("write sql: " + write_sql)
-            self.logger.info(self.writer_batch_msg_tmpl.format(self.table, len(docs), self.written,
-                                                               FuncSet.x2humansTime(cost_time)))
-        except Exception as e:
-            print(traceback.format_exc())
-            self.logger.error(e)
+        async with self._pool.acquire() as conn:
+            # 使用async with 方式 获取到链接以便自动回收，避免链接数过多
+            try:
+                before_write_ts = time()
+                # docs 's process
+                docs = list(map(OrderedDict, docs))
+                table_head = tuple(OrderedDict(docs[0]).keys())
+                values_desc = ", ".join(["%s"] * len(table_head))
+                table_head_desc = ", ".join(table_head)
+                values_list = list(map(tuple, [doc.values() for doc in docs]))
+
+                write_sql = f"INSERT INTO {self.table} ({table_head_desc}) VALUES ({values_desc});"
+                
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.executemany(write_sql, values_list)
+                    await conn.commit()
+                    
+                cost_time = time() - before_write_ts
+                self.written += len(docs)
+                self.logger.info("write sql: " + write_sql)
+                self.logger.info(self.writer_batch_msg_tmpl.format(self.table, len(docs), self.written,
+                                                                   FuncSet.x2humansTime(cost_time)))
+            except Exception as e:
+                self.logger.error(traceback.format_exc())
+                self.logger.error(e)
 

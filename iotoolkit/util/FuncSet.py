@@ -66,3 +66,17 @@ async def retry(func, times: int = 3, interval_tup: tuple = (1.0, 1.0), logger=N
         else:
             logger.error(f"retry times exceed, give up.")
     return wrapper
+
+
+def ensure_connected(method):
+    @wraps(method)
+    async def wrapper(method_this, *args, **kwargs):
+        if not inspect.iscoroutinefunction(method):
+            raise ValueError("method must be coroutine function...")
+        if not method_this.is_ready():
+            method_this.logger.info(
+                "{}[{}]'s connection building...".format(method_this.scheme, method_this.conn_config.get("db")))
+            await method_this._build_connect()
+        result = await method(method_this, *args, **kwargs)
+        return result
+    return wrapper
