@@ -9,7 +9,7 @@ from logging import Logger
 from motor.motor_asyncio import AsyncIOMotorCursor, AsyncIOMotorCollection, AsyncIOMotorDatabase, AsyncIOMotorClient
 from pymongo import MongoClient
 
-from iotoolkit.Meta import BasePack, BaseGetter, BaseWriter
+from iotoolkit.Packs.Meta import BasePack, BaseGetter, BaseWriter
 from iotoolkit.util import DefaultValue, LogKit, FuncSet
 from typing import List, Any
 from types import MappingProxyType, DynamicClassAttribute

@@ -12,7 +12,7 @@ import pymysql
 from typing import List, Dict
 import traceback
 
-from iotoolkit.Meta import BasePack, BaseGetter, BaseWriter
+from iotoolkit.Packs.Meta import BasePack, BaseGetter, BaseWriter
 from iotoolkit.util import DefaultValue, LogKit, FuncSet
 from sql_metadata import Parser
 from collections import OrderedDict
@@ -76,7 +76,7 @@ class MySqlPack(LogKit, BasePack):
         return writer
 
 
-class MySqlGetter(BaseGetter, LogKit):
+class MySqlGetter(BaseGetter):
     _pool: aiomysql.pool = None
     _conn: aiomysql.connection = None
     # 读取数据时需要保持cursor对象为同一个, 不使用async with方式实例化
