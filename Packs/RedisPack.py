@@ -12,39 +12,35 @@ from time import time
 
 
 class RedisPack(LogKit, BasePack):
-    origin_conn_obj = {
-        "pool": None,
-        "cli": None
-    }
-    
+
     def __init__(self, *args, **kwargs):
         self.scheme = "redis"
         BasePack.__init__(self, *args, **kwargs)
 
     def is_ready(self):
-        return all(list(self.origin_conn_obj.values()))
+        return self.origin_conn_obj.pool is not None and self.origin_conn_obj.cli is not None
 
     async def _build_connect(self) -> None:
         """
         build connection for dbs
         """
-        self.origin_conn_obj["pool"] = aioredis.ConnectionPool(decode_responses=True, **self.conn_config)
-        self.origin_conn_obj["cli"] = aioredis.Redis(connection_pool=self.origin_conn_obj["pool"])
+        self.origin_conn_obj.pool = aioredis.ConnectionPool(decode_responses=True, **self.conn_config)
+        self.origin_conn_obj.cli = aioredis.Redis(connection_pool=self.origin_conn_obj.pool)
 
     @FuncSet.ensure_connected
     async def new_getter(self, key_name: str, key_type: str = "LIST", batch_size: int = 100, max_size: int = 0):
         if key_type.upper() == "LIST":
-            return RedisListGetter(key_name=key_name, cli=self.origin_conn_obj["cli"], batch_size=batch_size, max_size=max_size)
+            return RedisListGetter(key_name=key_name, cli=self.origin_conn_obj.cli, batch_size=batch_size, max_size=max_size)
         else:
             raise NotImplementedError("other key type getter is not implemented.")
 
     @FuncSet.ensure_connected
     async def new_writer(self, key_name: str, ):
-        return RedisListWriter(key_name=key_name, cli=self.origin_conn_obj["cli"])
+        return RedisListWriter(key_name=key_name, cli=self.origin_conn_obj.cli)
 
 
 class RedisListGetter(BaseGetter):
-    src_name: str = ""
+    src_name: str
     
     def __init__(self, key_name: str, cli: aioredis.Redis, batch_size: int = None, max_size: int = 0):
         super().__init__(batch_size=batch_size, max_size=max_size)
@@ -66,7 +62,7 @@ class RedisListGetter(BaseGetter):
     
     
 class RedisListWriter(BaseWriter):
-    dst_name = ""
+    dst_name: str
     
     def __init__(self, key_name: str, cli: aioredis.Redis):
         super().__init__()

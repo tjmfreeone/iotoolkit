@@ -7,31 +7,27 @@ from hashlib import md5
 from logging import Logger
 
 from motor.motor_asyncio import AsyncIOMotorCursor, AsyncIOMotorCollection, AsyncIOMotorDatabase, AsyncIOMotorClient
-from pymongo import MongoClient
 
-from iotoolkit.Packs.Meta import BasePack, BaseGetter, BaseWriter
+from iotoolkit.Packs.Meta import BasePack, BaseGetter, BaseWriter, OriginConnObj
 from iotoolkit.util import DefaultValue, LogKit, FuncSet
 from typing import List, Any
 from types import MappingProxyType, DynamicClassAttribute
 
 
 class MongoPack(LogKit, BasePack):
-    origin_conn_obj = {
-        "db_cli": None
-    }
 
     def __init__(self, *args, **kwargs):
         self.scheme = "mongodb"
         BasePack.__init__(self, *args, **kwargs)
         
     def is_ready(self):
-        return self.origin_conn_obj["db_cli"] is not None
+        return self.origin_conn_obj.cli is not None
 
     async def _build_connect(self) -> None:
         if self.conn_config:
             db = self.conn_config["db"]
             self._async_conn = AsyncIOMotorClient(self.uri_parse.geturl())
-            self.origin_conn_obj["db_cli"] = self._async_conn[db]
+            self.origin_conn_obj.cli = self._async_conn[db]
         else:
             raise ConnectionError("conn_config is None")
 
@@ -50,7 +46,7 @@ class MongoPack(LogKit, BasePack):
         if return_fields is None:
             return_fields = list()
 
-        col_obj = self.origin_conn_obj["db_cli"].get_collection(col)
+        col_obj = self.origin_conn_obj.cli.get_collection(col)
         return_fields_dic = {field: 1 for field in return_fields}
         kwargs = dict(
             filter=query,
@@ -75,13 +71,13 @@ class MongoPack(LogKit, BasePack):
         :param col: collection's name
         :param write_method: insert, upsert or insertButNotUpdate
         """
-        col_obj = self.origin_conn_obj["db_cli"].get_collection(col)
+        col_obj = self.origin_conn_obj.cli.get_collection(col)
         writer = MongoWriter(col_obj, write_method or DefaultValue.mongo_writer_method)
         return writer
 
 
 class MongoGetter(BaseGetter):
-    src_name = ""
+    src_name: str
     
     def __init__(self, col_obj, cursor: AsyncIOMotorCursor, query, batch_size: int = None, max_size: int = 0):
         super().__init__(batch_size=batch_size, max_size=max_size)
@@ -104,7 +100,7 @@ class MongoGetter(BaseGetter):
 
 
 class MongoWriter(BaseWriter):
-    dst_name = ""
+    dst_name: str
     
     def __init__(self, col_obj: AsyncIOMotorCollection, write_method: str = "insert"):
         super().__init__()

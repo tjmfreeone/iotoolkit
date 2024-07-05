@@ -19,23 +19,20 @@ from collections import OrderedDict
 
 
 class MySqlPack(LogKit, BasePack):
-    origin_conn_obj = {
-        "pool": None,
-    }
     
     def __init__(self, *args, **kwargs):
         self.scheme = "mysql"
         BasePack.__init__(self, *args, **kwargs)
-        
+
     async def _build_connect(self):
         conn_config_copy = self.conn_config.copy()
         conn_config_copy["user"] = conn_config_copy.pop("username")
-        self.origin_conn_obj["pool"] = await aiomysql.create_pool(cursorclass=pymysql.cursors.DictCursor,
+        self.origin_conn_obj.pool = await aiomysql.create_pool(cursorclass=pymysql.cursors.DictCursor,
                                                                   autocommit=False,
                                                                   **conn_config_copy)
 
     def is_ready(self):
-        return self.origin_conn_obj["pool"] is not None
+        return self.origin_conn_obj.pool is not None
 
     @FuncSet.ensure_connected
     async def new_getter(self, select_sql: str = "", table: str = "", return_fields: List[str] = None, where: str = "", offset: int = 0, limit: int = 0, batch_size: int = 100) -> BaseGetter:
@@ -49,7 +46,7 @@ class MySqlPack(LogKit, BasePack):
         :param batch_size: batch size
         :return: async iter
         """
-        getter = MySqlGetter(pool=self.origin_conn_obj["pool"],
+        getter = MySqlGetter(pool=self.origin_conn_obj.pool,
                              select_sql=select_sql, table=table,
                              return_fields=return_fields, where=where,
                              offset=offset, limit=limit, batch_size=batch_size)
@@ -61,18 +58,18 @@ class MySqlPack(LogKit, BasePack):
         create a writer object
         :param table: 表名，写入前必须把表建好
         """
-        conn = await self.origin_conn_obj["pool"].acquire()
+        conn = await self.origin_conn_obj.pool.acquire()
         cursor = await conn.cursor(aiomysql.Cursor)
         await cursor.execute("show tables;")
 
         exists_tables = await cursor.fetchall()
         await cursor.close()
-        self.origin_conn_obj["pool"].release(conn)
+        self.origin_conn_obj.pool.release(conn)
 
         if table not in {t[0] for t in exists_tables}:
             raise ValueError("table is not exists.")
 
-        writer = MySqlWriter(pool=self.origin_conn_obj["pool"], table=table)
+        writer = MySqlWriter(pool=self.origin_conn_obj.pool, table=table)
         return writer
 
 
@@ -81,7 +78,7 @@ class MySqlGetter(BaseGetter):
     _conn: aiomysql.connection = None
     # 读取数据时需要保持cursor对象为同一个, 不使用async with方式实例化
     _cursor: aiomysql.DictCursor = None
-    src_name: str = ""
+    src_name: str
 
     def __init__(self, pool: aiomysql.pool = None,
                  select_sql: str = "", table: str = "",
@@ -143,7 +140,7 @@ class MySqlGetter(BaseGetter):
         
 class MySqlWriter(BaseWriter):
     _pool = None
-    dst_name: str = ""
+    dst_name: str
 
     def __init__(self, pool: aiomysql.pool, table: str = ""):
         super().__init__()

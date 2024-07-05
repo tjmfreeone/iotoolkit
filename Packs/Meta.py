@@ -4,20 +4,44 @@ import asyncio
 from abc import ABC, abstractmethod, abstractproperty
 from typing import List, Any
 from types import MappingProxyType, FunctionType
+from iotoolkit.PackManager import pack_manager
 from urllib.parse import urlparse
 from iotoolkit.util import LogKit, FuncSet
 from time import time
 
 
-class BasePack(ABC):
-    origin_conn_obj: dict
+class OriginConnObj(LogKit):
+    """接收动态属性"""
+    def __init__(self):
+        super().__setattr__('attrs', dict())
 
-    def __init__(self, uri=None, host: str = None, port: int = None, username: str = None, password: str = None,
-                 db: str = None, *args, **kwargs):
+    def __getattr__(self, key):
+        if key not in self.attrs:
+            return None
+        return self.attrs[key]
+
+    def __setattr__(self, key, value):
+        self.attrs[key] = value
+
+
+class BasePack(ABC):
+    origin_conn_obj: OriginConnObj
+
+    def __init__(self, uri: str = "", host: str = "", port: int = None, username: str = "", password: str = "",
+                 db: str = "", *args, **kwargs):
+        """
+        :param uri: 统一资源定位符(es无uri)
+        :param host: IP地址
+        :param port: 端口
+        :param username: 用户名
+        :param password: 密码
+        :param db: 指定db, 该字段在es中无效
+        """
         if not uri and not any([
             host, port, username, password, db
         ]):
             raise ValueError("connection params error!")
+        self.origin_conn_obj = OriginConnObj()
         # 优先解析uri
         if uri:
             self.uri_parse = urlparse(uri)
@@ -27,7 +51,7 @@ class BasePack(ABC):
                     "port": uri_parse.port,
                     "username": uri_parse.username,
                     "password": uri_parse.password,
-                    "db": uri_parse.path[1:]
+                    "db": uri_parse.path[1:],  # db only for mongodb/mysql/redis
                 }
             )
             self.scheme = self.uri_parse.scheme
@@ -38,12 +62,15 @@ class BasePack(ABC):
                     "port": int(port),
                     "username": username,
                     "password": password,
-                    "db": db
+                    "db": db,  # db only for mongodb/mysql/redis
                 }
             )
             query = "&".join([k + "=" + v for k, v in kwargs.items()])
+            # es没有uri，但是统一规范，这里不对es做特殊处理
             uri = self.scheme + "://{username}:{password}@{host}:{port}/{db}".format(**self.conn_config) + "?" + query
             self.uri_parse = urlparse(uri)
+
+        pack_manager.register_pack(self)
 
     @abstractmethod
     async def _build_connect(self) -> None:
@@ -76,7 +103,7 @@ class BasePack(ABC):
 
 class BaseGetter(ABC, LogKit):
     # src_name: 用于输出日志时指示读取源的名称
-    src_name = ""
+    src_name: str
     
     def __init__(self, src_name: str = "", batch_size: int = None, max_size: int = 0):
         # 以下参数为各个数据源都会有的参数，故抽出来放在这里
@@ -102,6 +129,7 @@ class BaseGetter(ABC, LogKit):
         :return: 
         """
         await self._get_total_count()
+
         if not self.first_fetch_ts:
             self.first_fetch_ts = time()
             self.last_fetch_ts = self.first_fetch_ts
@@ -145,7 +173,7 @@ class BaseGetter(ABC, LogKit):
    
 class BaseWriter(ABC, LogKit):
     # dst_name: 用于输出日志时指示写入源的名称
-    dst_name = ""
+    dst_name: str
 
     def __init__(self):
         self.written = 0

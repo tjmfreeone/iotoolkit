@@ -74,8 +74,12 @@ def ensure_connected(method):
         if not inspect.iscoroutinefunction(method):
             raise ValueError("method must be coroutine function...")
         if not method_this.is_ready():
-            method_this.logger.info(
-                "{}[{}]'s connection building...".format(method_this.scheme, method_this.conn_config.get("db")))
+            if hasattr(method_this, "conn_config"):
+                method_this.logger.info(
+                    "{}[{}]'s connection building...".format(method_this.scheme, method_this.conn_config.get("db")))
+            else:
+                method_this.logger.info(
+                    "{}'s connection building...".format(method_this.scheme))
             await method_this._build_connect()
         result = await method(method_this, *args, **kwargs)
         return result
