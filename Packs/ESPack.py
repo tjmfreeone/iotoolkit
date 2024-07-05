@@ -108,7 +108,7 @@ class ESWriter(BaseWriter):
         async def aiter_func():
             for doc in lst:
                 yield {"_index": self.index_name,
-                       "doc": doc}
+                       "_source": doc}
         await async_bulk(self.cli, aiter_func())
         
         
