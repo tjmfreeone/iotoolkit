@@ -5,7 +5,7 @@ import aioredis
 import redis
 import json
 
-from iotoolkit.Packs.Meta import BasePack, BaseGetter, BaseWriter, OriginConnObj
+from iotoolkit.Packs.Base import BasePack, BaseGetter, BaseWriter, OriginConnObj
 from iotoolkit.util import LogKit, DefaultValue, FuncSet
 from iotoolkit.PackManager import pack_manager
 from elasticsearch import AsyncElasticsearch
